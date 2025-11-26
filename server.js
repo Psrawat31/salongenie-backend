@@ -1,22 +1,24 @@
+require("dotenv").config();
+
 const express = require("express");
 const cors = require("cors");
 const multer = require("multer");
 const XLSX = require("xlsx");
+const sequelize = require("./db/init");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Storage for uploaded files
 const upload = multer({ storage: multer.memoryStorage() });
 
-// Test route
+// Health check
 app.get("/", (req, res) => {
   res.json({ message: "SalonGenie Backend Running" });
 });
 
-// Upload route
-app.post("/api/customers/upload", upload.single("file"), (req, res) => {
+// Upload customers
+app.post("/api/customers/upload", upload.single("file"), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: "No file uploaded" });
@@ -26,6 +28,8 @@ app.post("/api/customers/upload", upload.single("file"), (req, res) => {
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const jsonData = XLSX.utils.sheet_to_json(sheet);
 
+    // TODO: later we will insert jsonData into the DB.
+    // For now we just return it.
     return res.json({
       message: "Upload successful",
       total: jsonData.length,
@@ -38,4 +42,18 @@ app.post("/api/customers/upload", upload.single("file"), (req, res) => {
 });
 
 const PORT = process.env.PORT || 8000;
-app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
+
+sequelize
+  .authenticate()
+  .then(() => {
+    console.log("✅ Database connection OK");
+    return sequelize.sync();
+  })
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`✅ Backend + DB running on port ${PORT}`);
+    });
+  })
+  .catch((err) => {
+    console.error("❌ Database connection error:", err);
+  });
