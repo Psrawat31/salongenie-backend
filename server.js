@@ -5,7 +5,9 @@ const cors = require("cors");
 const multer = require("multer");
 const XLSX = require("xlsx");
 const sequelize = require("./config/db");
+
 const Customer = require("./models/Customer");
+const AI = require("./utils/followupAI");
 
 const app = express();
 app.use(cors());
@@ -13,12 +15,16 @@ app.use(express.json());
 
 const upload = multer({ storage: multer.memoryStorage() });
 
-// Health check
+// -----------------------------------------------------
+// Health Check
+// -----------------------------------------------------
 app.get("/", (req, res) => {
   res.json({ message: "SalonGenie Backend Running" });
 });
 
-// Upload customers + store in DB
+// -----------------------------------------------------
+// STEP 1 — Customer Upload + Save to DB
+// -----------------------------------------------------
 app.post("/api/customers/upload", upload.single("file"), async (req, res) => {
   try {
     if (!req.file) {
@@ -54,9 +60,49 @@ app.post("/api/customers/upload", upload.single("file"), async (req, res) => {
   }
 });
 
+// -----------------------------------------------------
+// STEP 2 — FREE AI FOLLOW-UP ENGINE (No OpenAI Needed)
+// -----------------------------------------------------
+app.get("/api/followups/pending", async (req, res) => {
+  try {
+    const customers = await Customer.findAll();
+
+    const result = customers.map(c => {
+      const days = c.lastVisit ? AI.daysBetween(c.lastVisit) : null;
+      const category = days !== null ? AI.categorizeCustomer(days) : "No Data";
+      const prob = days !== null ? AI.rebookingProbability(category) : "Unknown";
+      const action = days !== null ? AI.recommendedAction(category) : "No follow-up";
+      const message = days !== null
+        ? AI.aiMessage(c.name, days, c.service, category)
+        : "No last visit data available.";
+
+      return {
+        id: c.id,
+        name: c.name,
+        phone: c.phone,
+        service: c.service,
+        lastVisit: c.lastVisit,
+        daysSinceVisit: days,
+        category,
+        probability: prob,
+        recommendedAction: action,
+        aiMessage: message
+      };
+    });
+
+    res.json({ total: result.length, followups: result });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "AI follow-up generation failed" });
+  }
+});
+
+// -----------------------------------------------------
+// Start Server + Database
+// -----------------------------------------------------
 const PORT = process.env.PORT || 8000;
 
-// Start DB + Server
 sequelize
   .authenticate()
   .then(() => {
